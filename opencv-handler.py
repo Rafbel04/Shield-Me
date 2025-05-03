@@ -7,7 +7,6 @@ def process_image(image_path):
     image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     
     # get dimensions of the image
-    height, width = image.shape[:2]
 
     # Check if the image was loaded successfully
     if image is None:
@@ -31,17 +30,13 @@ def process_image(image_path):
 
     # generate contour lines
     contours, _ = cv2.findContours(mask_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    straightened = []
-    # straighten contour lines
-    for contour in contours:
-        straightened.append(cv2.approxPolyDP(contour, 0.02, True))
+    straightened = [cv2.approxPolyDP(c, 0.02, True) for c in contours]
 
     bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
     cv2.drawContours(bgr, straightened, -1, (0,255,0), 2)
     cv2.imshow("Contours", bgr)
     print(len(contours))
-    return straightened, height
+    return straightened
 
 def add_bottom_padding(img, pad_h=10, color=(0,0,0)):
     """
@@ -58,7 +53,7 @@ def add_bottom_padding(img, pad_h=10, color=(0,0,0)):
     )
     return padded
 
-def contours_to_scad(contours, img_h, scale=1.0, extrude_h=5.0, filename="output.scad"):
+def contours_to_scad(contours, scale=1.0, extrude_h=5.0, filename="output.scad"):
     """
     contours: list of numpy arrays from approxPolyDP
     img_h: original image height (needed to flip Y axis)
@@ -70,7 +65,7 @@ def contours_to_scad(contours, img_h, scale=1.0, extrude_h=5.0, filename="output
     scad.append("module ports() {")
     for cnt in contours:
         # build list of [x, y] flipping y so SVG/OpenSCAD coords match
-        pts = [[pt[0][0] * scale, (img_h - pt[0][1] * scale)] 
+        pts = [[float(pt[0][0]) * scale, (float(pt[0][1]) * scale)] 
                for pt in cnt]
         scad.append(f"  polygon(points={json.dumps(pts)});")
     scad.append("}")
@@ -102,23 +97,61 @@ def make_silhouette(image):
     sil[mask==255] = 255
     return sil
 
-def fit_into_IO_Shield(cnts, dim=[[5, 156], [4.5, 44.5]]):
-    extLeft = tuple(cnts[cnts[:, :, 0].argmin()][0])[0]
-    extRight = tuple(cnts[cnts[:, :, 0].argmax()][0])[0]
-    extTop = tuple(cnts[cnts[:, :, 1].argmin()][0])[1]
-    extBot = tuple(cnts[cnts[:, :, 1].argmax()][0])[1]
+def fit_into_IO_Shield(cnts, dim=[[5, 156], [4, 44.5]]):
+    cnts = [c.astype(np.float64, copy=True) for c in cnts]
 
-    xOffset = dim[0][0] - extLeft
+    extLeft, extBot, extRight, extTop = getContourExtremes(cnts)
+
+    scale = (dim[0][1]-dim[0][0]) / (extRight-extLeft)
+    fitCheck = (extTop-extBot)*scale < (dim[1][1] - dim[1][0])
+    if not fitCheck:
+        raise("ERROR: Mask is too tall, cannot fit into IO shield!")
+    
+    for cnt in cnts:
+        cnt[:,:,:2] = cnt[:,:,:2] * scale
+
+    newExtLeft, extBot, extRight, extTop = getContourExtremes(cnts)
+
+    pivotPoint = (extTop + extBot)/2
+
+    for cnt in cnts:
+        cnt[:,:,1] = 2.0 * pivotPoint - cnt[:, :, 1]
+
+    xOffset = dim[0][0] - newExtLeft
     yOffset = dim[1][0] - extBot
-    scale = dim[0][1] / extRight
-    fitCheck = extTop*scale < dim[1][1]
 
-        
+    for cnt in cnts:
+        cnt[:,:,0] = cnt[:,:,0] + xOffset
+        cnt[:,:,1] = cnt[:,:,1] + yOffset
+    
+    return cnts
+
+def getContourExtremes(cnts):
+    
+    """
+    Given a list of OpenCV contours (each shaped [N,1,2]),
+    return (min_x, min_y, max_x, max_y) across **all** points.
+    """
+    if not cnts:
+        raise ValueError("No contours passed in")
+
+    # Stack all points → shape [total_pts, 2]
+    pts = np.vstack([c.reshape(-1, 2) for c in cnts])
+
+    min_x = float(pts[:, 0].min())
+    max_x = float(pts[:, 0].max())
+    min_y = float(pts[:, 1].min())
+    max_y = float(pts[:, 1].max())
+
+    return min_x, min_y, max_x, max_y
+
 if __name__ == "__main__":
+    name = "asus Z790"
     # Example usage
-    image_path = "gigabyte b560m ds3h.png"
-    contours, h = process_image(image_path)
-    contours_to_scad(contours, h, 0.275, 5, "gigabyte.scad") #asus uses 0.213 scaling
+    image_path = name + ".png"
+    contours = process_image(image_path)
+    contours = fit_into_IO_Shield(contours)
+    contours_to_scad(contours, 1, 5, "asusz790.scad") #asus uses 0.213 scaling
 
     # Display the result
     cv2.waitKey(0)
