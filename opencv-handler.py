@@ -146,12 +146,12 @@ def getContourExtremes(cnts):
     return min_x, min_y, max_x, max_y
 
 if __name__ == "__main__":
-    name = "asus Z790"
+    name = "A320M-HDV.png"
     # Example usage
-    image_path = name + ".png"
+    image_path = name
     contours = process_image(image_path)
     contours = fit_into_IO_Shield(contours)
-    contours_to_scad(contours, 1, 5, "asusz790.scad") #asus uses 0.213 scaling
+    contours_to_scad(contours, 1, 5, "a320m.scad") #asus uses 0.213 scaling
 
     # Display the result
     cv2.waitKey(0)
