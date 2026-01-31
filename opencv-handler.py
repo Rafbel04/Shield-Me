@@ -97,7 +97,7 @@ def make_silhouette(image):
     sil[mask==255] = 255
     return sil
 
-def fit_into_IO_Shield(cnts, dim=[[5, 156], [4, 44.5]]):
+def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]]):
     cnts = [c.astype(np.float64, copy=True) for c in cnts]
 
     extLeft, extBot, extRight, extTop = getContourExtremes(cnts)
@@ -146,12 +146,12 @@ def getContourExtremes(cnts):
     return min_x, min_y, max_x, max_y
 
 if __name__ == "__main__":
-    name = "A320M-HDV.png"
+    name = "in\GB-b460m-ds3h-acy1.png"
     # Example usage
     image_path = name
     contours = process_image(image_path)
     contours = fit_into_IO_Shield(contours)
-    contours_to_scad(contours, 1, 5, "a320m.scad") #asus uses 0.213 scaling
+    contours_to_scad(contours, 1, 5, "GB-b460m-ds3h-acy1.scad") #asus uses 0.213 scaling
 
     # Display the result
     cv2.waitKey(0)
