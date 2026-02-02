@@ -68,15 +68,15 @@ def create_rectangular_cutout(width, height, filename, padding_percent=0.1,
 
 def create_circular_cutout(diameter, filename, padding_percent=0.1):
     """Create a circular cutout (for audio jacks, PS/2, etc.)"""
-    size = diameter
-    cutout = np.zeros((size, size), dtype=np.uint8)  # BLACK background
-    
-    # Calculate radius with padding
+    # Calculate radius with padding, then size the canvas to fit
     radius = int((diameter / 2) * (1 + padding_percent))
+    size = radius * 2 + 1
+    cutout = np.zeros((size, size), dtype=np.uint8)  # BLACK background
+
     center = (size // 2, size // 2)
-    
+
     cv2.circle(cutout, center, radius, 255, -1)  # WHITE circle
-    
+
     cv2.imwrite(filename, cutout)
     print(f"Created: {filename} ({size}x{size}px, circular)")
 

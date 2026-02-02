@@ -2,17 +2,104 @@ import cv2
 import json
 import numpy as np
 
-def process_image(image_path):
+def _get_contour_count(sil, min_area=100):
+    """
+    Count meaningful contours in a silhouette image.
+    Filters out tiny noise contours below min_area pixels.
+    """
+    mask = cv2.medianBlur(sil, 3)
+    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Filter out tiny contours (noise)
+    contours = [c for c in contours if cv2.contourArea(c) >= min_area]
+    return len(contours), contours
+
+
+def calibrate_and_crop(image, min_contours=3, step=5):
+    """
+    Remove the reference line from the bottom of manufacturer images by
+    progressively cropping until the single connected contour (ports + line)
+    splits into multiple independent port shapes.
+
+    Args:
+        image: Input BGR image with reference line at bottom
+        min_contours: Minimum number of contours to consider the line removed
+        step: Pixel step size for coarse scan (refined to 1px after)
+
+    Returns:
+        tuple: (cropped_image, crop_y) or (None, None) if no line found
+    """
+    h, w = image.shape[:2]
+
+    # Convert to silhouette for contour analysis
+    sil_full = make_silhouette(image)
+
+    # Get baseline contour count with full image
+    baseline_count, baseline_cnts = _get_contour_count(sil_full)
+    print(f"Full image contour count: {baseline_count}")
+
+    if baseline_count >= min_contours:
+        # Already has multiple contours - no reference line to remove
+        print("Image already has multiple contours. No reference line to remove.")
+        return None, None
+
+    if not baseline_cnts:
+        print("Warning: No contours found in image.")
+        return None, None
+
+    # Coarse scan: crop from bottom in steps, looking for contour split
+    crop_y_coarse = None
+    for crop_y in range(h - 1, int(h * 0.5), -step):
+        sil_cropped = make_silhouette(image[:crop_y, :])
+        sil_cropped = add_bottom_padding(sil_cropped)
+        count, _ = _get_contour_count(sil_cropped)
+
+        if count >= min_contours:
+            crop_y_coarse = crop_y
+            break
+
+    if crop_y_coarse is None:
+        print("Warning: Could not find reference line by contour splitting.")
+        return None, None
+
+    # Fine scan: refine to single-pixel accuracy
+    fine_start = min(crop_y_coarse + step, h - 1)
+    crop_y_final = crop_y_coarse
+
+    for crop_y in range(fine_start, crop_y_coarse - 1, -1):
+        sil_cropped = make_silhouette(image[:crop_y, :])
+        sil_cropped = add_bottom_padding(sil_cropped)
+        count, _ = _get_contour_count(sil_cropped)
+
+        if count >= min_contours:
+            crop_y_final = crop_y
+            break
+
+    print(f"\nReference line removed at Y={crop_y_final}")
+
+    # Crop the original image at the split point
+    cropped_image = image[:crop_y_final, :]
+
+    print(f"Cropped image from {h} to {crop_y_final} pixels height")
+    print(f"Removed {h - crop_y_final} pixels from bottom\n")
+
+    return cropped_image, crop_y_final
+
+def process_image(image_path, auto_crop=True):
     # Load the image
     image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-    
-    # get dimensions of the image
 
     # Check if the image was loaded successfully
     if image is None:
         raise ValueError(f"Image at path {image_path} could not be loaded.")
 
-    # turns image into silhouette 
+    # Try to crop the reference line from the bottom
+    if auto_crop:
+        cropped, crop_y = calibrate_and_crop(image)
+        if cropped is not None:
+            image = cropped
+
+    # turns image into silhouette
     sil = make_silhouette(image)
 
     # add padding to bottom of image to ensure closed edges
@@ -103,34 +190,68 @@ def make_silhouette(image):
     sil[mask==255] = 255
     return sil
 
-def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]]):
+def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None, left_anchor_mm=8.0):
+    """
+    Scale and position contours to fit within standard IO shield dimensions.
+
+    Args:
+        cnts: List of contours
+        dim: [[x_min, x_max], [y_min, y_max]] in mm
+        pixels_per_mm: Calibrated scale factor. If None, will auto-calculate from contours.
+        left_anchor_mm: When calibrated, distance from the plate's left edge to the
+                        leftmost port (mm). This corresponds to the "top" of the IO
+                        shield when the PC is standing upright.
+
+    Returns:
+        Scaled and positioned contours in mm coordinates
+    """
     cnts = [c.astype(np.float64, copy=True) for c in cnts]
 
     extLeft, extBot, extRight, extTop = getContourExtremes(cnts)
 
-    scale = (dim[0][1]-dim[0][0]) / (extRight-extLeft) * 0.302
+    if pixels_per_mm is not None:
+        # Use calibrated scale: convert pixels to mm
+        scale = 1.0 / pixels_per_mm
+        print(f"\nUsing calibrated scale: {scale:.6f} mm/pixel")
+        print(f"(pixels_per_mm: {pixels_per_mm:.4f})")
+    else:
+        # Fallback: auto-calculate scale to fit width
+        scale = (dim[0][1]-dim[0][0]) / (extRight-extLeft)
+        print(f"\nNo calibration data - auto-scaling to fit width")
+        print(f"Scale: {scale:.6f} mm/pixel")
+
     fitCheck = (extTop-extBot)*scale < (dim[1][1] - dim[1][0])
     if not fitCheck:
-        # FIXED: Properly raise ValueError instead of calling raise as a function
         raise ValueError("ERROR: Mask is too tall, cannot fit into IO shield!")
-    
+
     for cnt in cnts:
         cnt[:,:,:2] = cnt[:,:,:2] * scale
 
     newExtLeft, extBot, extRight, extTop = getContourExtremes(cnts)
 
+    # Flip Y axis (image Y increases downward, SCAD Y increases upward)
     pivotPoint = (extTop + extBot)/2
 
     for cnt in cnts:
         cnt[:,:,1] = 2.0 * pivotPoint - cnt[:, :, 1]
 
-    xOffset = dim[0][0] - newExtLeft
+    # Recalculate extremes after flip
+    newExtLeft, extBot, extRight, extTop = getContourExtremes(cnts)
+
+    if pixels_per_mm is not None and left_anchor_mm is not None:
+        # Calibrated mode: anchor leftmost port at left_anchor_mm from plate edge
+        xOffset = left_anchor_mm - newExtLeft
+    else:
+        # Uncalibrated fallback: align to dim left boundary
+        xOffset = dim[0][0] - newExtLeft
+
+    # Bottom-align ports
     yOffset = dim[1][0] - extBot
 
     for cnt in cnts:
         cnt[:,:,0] = cnt[:,:,0] + xOffset
         cnt[:,:,1] = cnt[:,:,1] + yOffset
-    
+
     return cnts
 
 def getContourExtremes(cnts):
@@ -153,12 +274,19 @@ def getContourExtremes(cnts):
     return min_x, min_y, max_x, max_y
 
 if __name__ == "__main__":
-    name = "in\GB-b460m-ds3h-acy1.png"
-    # Example usage
+    import sys
+
+    name = sys.argv[1] if len(sys.argv) > 1 else "IO pics/MSI-A520m.png"
     image_path = name
-    contours = process_image(image_path)
+    contours = process_image(image_path, auto_crop=True)
+
+    # Note: For calibrated scale, use the complete_pipeline.py which
+    # derives pixels_per_mm from RJ45 detection via template matching.
     contours = fit_into_IO_Shield(contours)
-    contours_to_scad(contours, 1, 5, "GB-b460m-ds3h-acy1.scad") #asus uses 0.213 scaling
+
+    # Generate SCAD file
+    output_name = name.split('/')[-1].replace('.png', '.scad')
+    contours_to_scad(contours, 1, 5, output_name)
 
     # Display the result
     cv2.waitKey(0)

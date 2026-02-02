@@ -1,2 +1,5 @@
 /in
 /out
+/.claude
+/.vscode
+/__pycache__
