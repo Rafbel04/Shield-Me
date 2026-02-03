@@ -215,7 +215,8 @@ def full_pipeline(motherboard_image_path, output_scad_name=None,
         fitted_contours = fit_into_IO_Shield(
             straightened,
             dim=[[8, 156], [4, 44.5]],  # [[x_min, x_max], [y_min, y_max]]
-            pixels_per_mm=pixels_per_mm
+            pixels_per_mm=pixels_per_mm,
+            left_anchor_mm=8.0  # Reduced from default 8.0 to prevent right-edge clipping
         )
         print("✓ Contours fitted to standard ATX IO shield")
     except Exception as e:
@@ -342,7 +343,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Shield-Me IO Shield Generator")
-    parser.add_argument("image", nargs="?", default="IO pics\\MSI-A520m.png",
+    parser.add_argument("image", nargs="?", default="IO pics\\asus-tuf-b365m-gaming.png",
                         help="Path to motherboard IO photo")
     parser.add_argument("-o", "--output", default=None,
                         help="Output .scad filename")

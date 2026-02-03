@@ -252,6 +252,29 @@ def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None, left
         cnt[:,:,0] = cnt[:,:,0] + xOffset
         cnt[:,:,1] = cnt[:,:,1] + yOffset
 
+    # Check if ports exceed right boundary and scale down if needed
+    newExtLeft, extBot, extRight, extTop = getContourExtremes(cnts)
+    if extRight > dim[0][1]:
+        overflow = extRight - dim[0][1]
+        print(f"\nWARNING: Ports extend {overflow:.2f}mm beyond right edge!")
+        print(f"Applying correction scale to fit within boundaries...")
+
+        # Calculate correction scale to fit within boundaries
+        available_width = dim[0][1] - dim[0][0]
+        actual_width = extRight - newExtLeft
+        correction_scale = available_width / actual_width
+
+        print(f"Correction scale: {correction_scale:.4f}")
+
+        # Re-scale and re-position
+        for cnt in cnts:
+            # Scale around left edge
+            cnt[:,:,0] = (cnt[:,:,0] - newExtLeft) * correction_scale + dim[0][0]
+
+        # Verify final position
+        finalLeft, finalBot, finalRight, finalTop = getContourExtremes(cnts)
+        print(f"Final position: X=[{finalLeft:.2f}, {finalRight:.2f}]mm")
+
     return cnts
 
 def getContourExtremes(cnts):
