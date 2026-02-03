@@ -25,7 +25,7 @@ class PortMaskApplicator:
     # These must match what the template image actually shows (housing, bezel, etc.),
     # not just the bare connector opening.
     PORT_PHYSICAL_DIMENSIONS = {
-        'usb': (13.1, 5.7),       # USB Type-A receptacle housing
+        'usb': (12.4, 4.5),       # USB Type-A receptacle housing
         'usb_c': (8.9, 3.2),      # USB Type-C receptacle
         'hdmi': (14.0, 4.6),      # HDMI Type-A
         'dp': (16.1, 4.4),        # DisplayPort

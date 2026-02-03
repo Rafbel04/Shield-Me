@@ -216,7 +216,7 @@ def full_pipeline(motherboard_image_path, output_scad_name=None,
             straightened,
             dim=[[8, 156], [4, 44.5]],  # [[x_min, x_max], [y_min, y_max]]
             pixels_per_mm=pixels_per_mm,
-            left_anchor_mm=8.0  # Reduced from default 8.0 to prevent right-edge clipping
+            left_anchor_mm=6.0  # Reduced from default 8.0 to prevent right-edge clipping
         )
         print("✓ Contours fitted to standard ATX IO shield")
     except Exception as e:
