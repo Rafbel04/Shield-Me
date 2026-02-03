@@ -361,7 +361,7 @@ class PortMaskApplicator:
         
         return intersection / union if union > 0 else 0
     
-    def create_clean_mask(self, image_shape, detections):
+    def create_clean_mask(self, image_shape, detections, cutout_scales=None):
         """
         Create a clean binary mask by applying pre-made cutouts at detected positions.
         
@@ -398,6 +398,11 @@ class PortMaskApplicator:
 
             cutout = self.port_configs[port_type]['cutout']
             uni_w, uni_h = uniform_sizes[port_type]
+
+            if cutout_scales and port_type in cutout_scales:
+                cs = cutout_scales[port_type]
+                uni_w = int(uni_w * cs)
+                uni_h = int(uni_h * cs)
 
             # Scale the cutout to the uniform size
             scaled_cutout = cv2.resize(cutout, (uni_w, uni_h),

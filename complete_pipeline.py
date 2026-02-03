@@ -105,7 +105,7 @@ def full_pipeline(motherboard_image_path, output_scad_name=None,
 
     if detection_mode == "manual":
         print("MODE: Interactive selection (draw boxes, CV refines)")
-        detections = interactive_detect_ports(image, applicator)
+        detections = interactive_detect_ports(image, applicator, image_name=input_path.name)
         if not detections:
             print("\nNo ports were marked (cancelled or empty).")
             return False

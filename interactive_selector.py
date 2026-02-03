@@ -7,7 +7,9 @@ within each drawn region to refine the exact position and size.
 """
 
 import cv2
+import json
 import numpy as np
+import os
 
 
 class InteractivePortSelector:
@@ -53,14 +55,18 @@ class InteractivePortSelector:
         'screw':         (0, 128, 128),
     }
 
-    def __init__(self, image, applicator):
+    def __init__(self, image, applicator, image_name=None, config_dir="saved_configs"):
         """
         Args:
             image: Original BGR image (full resolution).
             applicator: PortMaskApplicator instance (for region-scoped detection).
+            image_name: Original image filename (for save/load config matching).
+            config_dir: Directory to store/load saved configurations.
         """
         self._original_image = image
         self._applicator = applicator
+        self._image_name = image_name
+        self._config_dir = config_dir
         self._detections = []       # final detection tuples (original coords)
         self._is_refined = []       # True if CV-refined, False if fallback
         self._current_port = 'usb'
@@ -70,6 +76,9 @@ class InteractivePortSelector:
         self._show_help = True
         self._cancelled = False
         self._threshold = 0.5
+
+        # Load saved config if available
+        self._load_config()
 
         # Compute display scaling
         orig_h, orig_w = image.shape[:2]
@@ -83,6 +92,65 @@ class InteractivePortSelector:
             self._display_image = cv2.resize(image, (disp_w, disp_h))
         else:
             self._display_image = image.copy()
+
+    # ------------------------------------------------------------------
+    # Config save / load
+    # ------------------------------------------------------------------
+
+    def _config_path(self):
+        """Return the JSON config path for the current image, or None."""
+        if not self._image_name:
+            return None
+        stem = os.path.splitext(self._image_name)[0]
+        return os.path.join(self._config_dir, f"{stem}.json")
+
+    def _load_config(self):
+        """Load previously saved detections for this image, if any."""
+        path = self._config_path()
+        if path is None or not os.path.isfile(path):
+            return
+
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+
+        for d in data.get("detections", []):
+            det = (d["x"], d["y"], d["w"], d["h"],
+                   d["scale"], d["port_type"], d["confidence"])
+            self._detections.append(det)
+            self._is_refined.append(d.get("is_refined", False))
+
+        if self._detections:
+            print(f"  Loaded {len(self._detections)} saved detection(s) from {path}")
+
+    def _save_config(self):
+        """Persist current detections to JSON for this image."""
+        path = self._config_path()
+        if path is None:
+            return
+
+        os.makedirs(self._config_dir, exist_ok=True)
+
+        entries = []
+        for det, refined in zip(self._detections, self._is_refined):
+            x, y, w, h, scale, port_type, confidence = det
+            entries.append({
+                "x": int(x), "y": int(y), "w": int(w), "h": int(h),
+                "scale": float(scale), "port_type": port_type,
+                "confidence": float(confidence), "is_refined": refined,
+            })
+
+        data = {
+            "image_filename": self._image_name,
+            "detections": entries,
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        print(f"  Config saved to {path}")
 
     def run(self):
         """
@@ -136,6 +204,7 @@ class InteractivePortSelector:
             print("Selection cancelled.")
             return []
 
+        self._save_config()
         print(f"\nFinalized {len(self._detections)} port(s).")
         return list(self._detections)
 
@@ -159,6 +228,9 @@ class InteractivePortSelector:
             self._drawing = False
             self._drag_current = (x, y)
             self._commit_rectangle()
+
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            self._delete_at(x, y)
 
     def _commit_rectangle(self):
         """Convert drawn rectangle to original coords and run CV refinement."""
@@ -197,6 +269,19 @@ class InteractivePortSelector:
 
         self._drag_start = None
         self._drag_current = None
+
+    def _delete_at(self, dx, dy):
+        """Delete the detection under the display-coordinate click point."""
+        ox, oy = self._display_to_original(dx, dy)
+
+        # Search in reverse so we hit the topmost (latest) detection first
+        for i in range(len(self._detections) - 1, -1, -1):
+            x, y, w, h, _, port_type, _ = self._detections[i]
+            if x <= ox <= x + w and y <= oy <= y + h:
+                self._detections.pop(i)
+                self._is_refined.pop(i)
+                print(f"  Deleted: {port_type}")
+                return
 
     # ------------------------------------------------------------------
     # Coordinate conversion
@@ -262,7 +347,7 @@ class InteractivePortSelector:
         text = (f"Port: {self._current_port}  |  "
                 f"Thresh: {self._threshold:.2f}  |  "
                 f"Placed: {len(self._detections)}  |  "
-                f"[?] Help  [z] Undo  [Enter/q] Done  [Esc] Cancel")
+                f"[RClick] Del  [z] Undo  [?] Help  [Enter/q] Done")
         cv2.putText(frame, text, (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
@@ -335,7 +420,7 @@ def _draw_dashed_line(frame, pt1, pt2, color, dash_len=8, gap_len=5):
         cv2.line(frame, (sx, sy), (ex, ey), color, 2)
 
 
-def interactive_detect_ports(image, applicator):
+def interactive_detect_ports(image, applicator, image_name=None):
     """
     Drop-in replacement for PortMaskApplicator.detect_ports() that uses
     interactive user selection with CV refinement.
@@ -343,11 +428,12 @@ def interactive_detect_ports(image, applicator):
     Args:
         image: BGR image (full resolution)
         applicator: PortMaskApplicator instance
+        image_name: Original image filename (for save/load config matching)
 
     Returns:
         List of (x, y, w, h, scale, port_type, confidence) tuples
     """
-    selector = InteractivePortSelector(image, applicator)
+    selector = InteractivePortSelector(image, applicator, image_name=image_name)
     return selector.run()
 
 
@@ -362,7 +448,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     app = PortMaskApplicator("templates", "cutouts")
-    dets = interactive_detect_ports(img, app)
+    dets = interactive_detect_ports(img, app, image_name=os.path.basename(path))
     print(f"\nDetections ({len(dets)}):")
     for d in dets:
         print(f"  {d[5]}: pos=({d[0]},{d[1]}) size={d[2]}x{d[3]} "
