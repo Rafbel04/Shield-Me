@@ -190,7 +190,8 @@ def make_silhouette(image):
     sil[mask==255] = 255
     return sil
 
-def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None, left_anchor_mm=8.0):
+def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None,
+                       left_anchor_mm=8.0, bottom_anchor_mm=4.0):
     """
     Scale and position contours to fit within standard IO shield dimensions.
 
@@ -201,6 +202,8 @@ def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None, left
         left_anchor_mm: When calibrated, distance from the plate's left edge to the
                         leftmost port (mm). This corresponds to the "top" of the IO
                         shield when the PC is standing upright.
+        bottom_anchor_mm: Distance from the plate's bottom edge to the bottommost
+                          port (mm).
 
     Returns:
         Scaled and positioned contours in mm coordinates
@@ -245,8 +248,8 @@ def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None, left
         # Uncalibrated fallback: align to dim left boundary
         xOffset = dim[0][0] - newExtLeft
 
-    # Bottom-align ports
-    yOffset = dim[1][0] - extBot
+    # Anchor bottommost port at bottom_anchor_mm from plate bottom edge
+    yOffset = bottom_anchor_mm - extBot
 
     for cnt in cnts:
         cnt[:,:,0] = cnt[:,:,0] + xOffset

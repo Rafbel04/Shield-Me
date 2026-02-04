@@ -85,7 +85,8 @@ def phase_a_detect(image_path, templates_dir="templates", cutouts_dir="cutouts",
 
 
 def phase_b_generate(phase_a_result, cutout_scales=None,
-                     ppm_multiplier=1.0, left_anchor_mm=6.0):
+                     ppm_multiplier=1.0, left_anchor_mm=6.0,
+                     bottom_anchor_mm=4.0):
     """
     Phase B: Create mask, extract contours, fit to IO shield.
 
@@ -97,6 +98,7 @@ def phase_b_generate(phase_a_result, cutout_scales=None,
         cutout_scales: {port_type: float} per-type cutout scale (default 1.0).
         ppm_multiplier: Multiplier applied to pixels_per_mm (default 1.0).
         left_anchor_mm: Left anchor offset in mm (default 6.0).
+        bottom_anchor_mm: Bottom anchor offset in mm (default 4.0).
 
     Returns:
         dict with keys {mask, contours_fitted, pixels_per_mm_adjusted},
@@ -135,6 +137,7 @@ def phase_b_generate(phase_a_result, cutout_scales=None,
         dim=[[8, 156], [4, 44.5]],
         pixels_per_mm=pixels_per_mm,
         left_anchor_mm=left_anchor_mm,
+        bottom_anchor_mm=bottom_anchor_mm,
     )
 
     return {

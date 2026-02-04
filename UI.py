@@ -37,13 +37,26 @@ class ShieldMeApp:
 
         # State
         self.image_path = None
+        self.official_shield_path = None
+        self.official_shield_image = None
         self.phase_a_result = None
         self.phase_b_result = None
         self.cutout_scales = {}  # {port_type: float}
 
+        # Contour selection / movement
+        self.selected_contour_idx = None
+        self.move_step_mm = 0.25
+
+        # Preview coordinate transform (set during _update_shield_preview)
+        self._preview_ox = 0
+        self._preview_oy = 0
+        self._preview_s = 1.0
+        self._preview_plate_h = 48.5
+
         # Tkinter variables
         self.ppm_multiplier = tk.DoubleVar(value=1.00)
         self.left_anchor_mm = tk.DoubleVar(value=6.0)
+        self.bottom_anchor_mm = tk.DoubleVar(value=4.0)
         self.cutout_scale_var = tk.DoubleVar(value=1.0)
         self.selected_port_type = tk.StringVar(value='')
 
@@ -59,12 +72,16 @@ class ShieldMeApp:
         top = tk.Frame(self.root, padx=10, pady=8)
         top.pack(fill=tk.X)
 
-        self.select_btn = tk.Button(top, text="Select Image", command=self._select_image)
+        self.select_btn = tk.Button(top, text="Select IO Image", command=self._select_image)
         self.select_btn.pack(side=tk.LEFT)
 
         self.file_label = tk.Label(top, text="No image selected", fg="gray",
                                    anchor="w", padx=10)
         self.file_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.select_official_btn = tk.Button(top, text="Load Official Shield",
+                                             command=self._select_official_shield)
+        self.select_official_btn.pack(side=tk.RIGHT, padx=(0, 5))
 
         self.detect_btn = tk.Button(top, text="Detect Ports", command=self._start_detection)
         self.detect_btn.pack(side=tk.RIGHT)
@@ -92,9 +109,15 @@ class ShieldMeApp:
 
         # -- Left: 2D Shield preview --
         tk.Label(left, text="IO Shield Preview", font=("Arial", 11, "bold")).pack(anchor="w")
-        self.shield_canvas = tk.Canvas(left, bg="#2a2a2a", height=180, relief=tk.SUNKEN)
-        self.shield_canvas.pack(fill=tk.X, pady=(2, 0))
+        self.shield_canvas = tk.Canvas(left, bg="#2a2a2a", height=300, relief=tk.SUNKEN,
+                                        takefocus=True)
+        self.shield_canvas.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
         self.shield_canvas.bind("<Configure>", lambda e: self._update_shield_preview())
+        self.shield_canvas.bind("<Button-1>", self._on_shield_click)
+        self.shield_canvas.bind("<Left>", self._on_arrow_key)
+        self.shield_canvas.bind("<Right>", self._on_arrow_key)
+        self.shield_canvas.bind("<Up>", self._on_arrow_key)
+        self.shield_canvas.bind("<Down>", self._on_arrow_key)
 
         # -- Right: Detection summary --
         tk.Label(right, text="Detection Summary", font=("Arial", 11, "bold")).pack(anchor="w")
@@ -136,6 +159,19 @@ class ShieldMeApp:
 
         self.anchor_entry = tk.Entry(anch_row, textvariable=self.left_anchor_mm, width=6)
         self.anchor_entry.pack(side=tk.LEFT)
+
+        # Bottom anchor offset
+        tk.Label(controls, text="Bottom Anchor Offset (mm):").pack(anchor="w", pady=(8, 0))
+        bot_row = tk.Frame(controls)
+        bot_row.pack(fill=tk.X, pady=(2, 0))
+
+        self.bottom_anchor_slider = tk.Scale(bot_row, from_=0.0, to=20.0, resolution=0.5,
+                                              orient=tk.HORIZONTAL, variable=self.bottom_anchor_mm,
+                                              showvalue=False)
+        self.bottom_anchor_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        self.bottom_anchor_entry = tk.Entry(bot_row, textvariable=self.bottom_anchor_mm, width=6)
+        self.bottom_anchor_entry.pack(side=tk.LEFT)
 
         # Scale multiplier
         tk.Label(controls, text="Scale Multiplier (pixels/mm):").pack(anchor="w", pady=(8, 0))
@@ -197,6 +233,8 @@ class ShieldMeApp:
         self.cutout_entry.config(state=state)
         self.anchor_slider.config(state=state)
         self.anchor_entry.config(state=state)
+        self.bottom_anchor_slider.config(state=state)
+        self.bottom_anchor_entry.config(state=state)
         self.ppm_slider.config(state=state)
         self.ppm_entry.config(state=state)
 
@@ -222,6 +260,28 @@ class ShieldMeApp:
         self.file_label.config(text=os.path.basename(path), fg="black")
         self._set_state_image_loaded()
         self._set_status(f"Image selected: {os.path.basename(path)}")
+
+    def _select_official_shield(self):
+        path = filedialog.askopenfilename(
+            title="Select official IO shield image",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.bmp *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+
+        # Load the image
+        img = cv2.imread(path)
+        if img is None:
+            self._set_status(f"Error: Could not load official shield image")
+            return
+
+        self.official_shield_path = path
+        self.official_shield_image = img
+        self._update_shield_preview()
+        self._set_status(f"Official shield loaded: {os.path.basename(path)}")
 
     # ------------------------------------------------------------------
     # Detection (threaded)
@@ -309,6 +369,8 @@ class ShieldMeApp:
         if self.phase_a_result is None:
             return
 
+        self.selected_contour_idx = None
+
         self._set_status("Generating mask and fitting contours...")
         self.root.update_idletasks()
 
@@ -320,6 +382,7 @@ class ShieldMeApp:
                 cutout_scales=scales,
                 ppm_multiplier=self.ppm_multiplier.get(),
                 left_anchor_mm=self.left_anchor_mm.get(),
+                bottom_anchor_mm=self.bottom_anchor_mm.get(),
             )
         except Exception as e:
             self._set_status(f"Error: {e}")
@@ -354,6 +417,62 @@ class ShieldMeApp:
         self.mask_label.image = photo  # prevent GC
 
     # ------------------------------------------------------------------
+    # Contour selection and movement
+    # ------------------------------------------------------------------
+
+    def _canvas_to_mm(self, cx, cy):
+        """Convert canvas pixel coordinates back to mm coordinates."""
+        mx = (cx - self._preview_ox) / self._preview_s
+        my = self._preview_plate_h - (cy - self._preview_oy) / self._preview_s
+        return mx, my
+
+    def _on_shield_click(self, event):
+        """Handle click on shield canvas to select/deselect a contour."""
+        self.shield_canvas.focus_set()
+
+        if not (self.phase_b_result and self.phase_b_result["contours_fitted"]):
+            return
+
+        mx, my = self._canvas_to_mm(event.x, event.y)
+        click_pt = (mx, my)
+
+        # Check each contour for hit
+        for i, cnt in enumerate(self.phase_b_result["contours_fitted"]):
+            # Reshape to (N, 2) for pointPolygonTest
+            pts = cnt.reshape(-1, 2).astype(np.float32)
+            if cv2.pointPolygonTest(pts, click_pt, False) >= 0:
+                self.selected_contour_idx = i
+                self._update_shield_preview()
+                self._set_status(f"Selected contour {i + 1} -- use arrow keys to move")
+                return
+
+        # Clicked empty space -- deselect
+        self.selected_contour_idx = None
+        self._update_shield_preview()
+        self._set_status("Preview updated. Adjust parameters or save SCAD.")
+
+    def _on_arrow_key(self, event):
+        """Move the selected contour with arrow keys."""
+        if self.selected_contour_idx is None:
+            return
+        if not (self.phase_b_result and self.phase_b_result["contours_fitted"]):
+            return
+
+        cnt = self.phase_b_result["contours_fitted"][self.selected_contour_idx]
+        step = self.move_step_mm
+
+        if event.keysym == "Left":
+            cnt[:, :, 0] -= step
+        elif event.keysym == "Right":
+            cnt[:, :, 0] += step
+        elif event.keysym == "Up":
+            cnt[:, :, 1] += step  # Y increases upward in SCAD coords
+        elif event.keysym == "Down":
+            cnt[:, :, 1] -= step
+
+        self._update_shield_preview()
+
+    # ------------------------------------------------------------------
     # 2D Shield preview (canvas)
     # ------------------------------------------------------------------
 
@@ -364,12 +483,16 @@ class ShieldMeApp:
         # Full IO shield plate dimensions (mm)
         plate_w_mm = 164.0
         plate_h_mm = 48.5
-        # Cutout area
-        cut_x_min, cut_x_max = 8.0, 156.0
-        cut_y_min, cut_y_max = 4.0, 44.5
+
+        # Usable area is 3.8mm inset from physical edges
+        inset_mm = 3.8
+        usable_x_min = inset_mm
+        usable_x_max = plate_w_mm - inset_mm
+        usable_y_min = inset_mm
+        usable_y_max = plate_h_mm - inset_mm
 
         cw = canvas.winfo_width() or 600
-        ch = canvas.winfo_height() or 180
+        ch = canvas.winfo_height() or 300
         margin = 15
 
         sx = (cw - 2 * margin) / plate_w_mm
@@ -382,31 +505,57 @@ class ShieldMeApp:
         ox = (cw - total_w) / 2
         oy = (ch - total_h) / 2
 
+        # Store transform for click-to-mm conversion
+        self._preview_ox = ox
+        self._preview_oy = oy
+        self._preview_s = s
+        self._preview_plate_h = plate_h_mm
+
         def mm_to_canvas(mx, my):
             cx = ox + mx * s
             cy = oy + (plate_h_mm - my) * s  # flip Y
             return cx, cy
 
-        # Shield plate outline
+        # BACKGROUND: Draw official shield image if loaded
+        if self.official_shield_image is not None:
+            target_w = int(total_w)
+            target_h = int(total_h)
+            resized = cv2.resize(self.official_shield_image, (target_w, target_h))
+
+            # Convert BGR to RGB for tkinter
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb)
+            photo = ImageTk.PhotoImage(pil_img)
+
+            # Display the image centered on the canvas
+            canvas.create_image(ox, oy, image=photo, anchor=tk.NW)
+            canvas.image = photo  # prevent GC
+
+        # Outer edge: Physical shield plate outline (SOLID)
         x0, y0 = mm_to_canvas(0, 0)
         x1, y1 = mm_to_canvas(plate_w_mm, plate_h_mm)
         canvas.create_rectangle(x0, y1, x1, y0, outline="#666", width=2)
 
-        # Cutout area boundary (dashed)
-        cx0, cy0 = mm_to_canvas(cut_x_min, cut_y_min)
-        cx1, cy1 = mm_to_canvas(cut_x_max, cut_y_max)
-        canvas.create_rectangle(cx0, cy1, cx1, cy0, outline="#4488cc", width=1, dash=(4, 4))
+        # Inner edge: Usable area 3.8mm inset from outer edge (DASHED)
+        ux0, uy0 = mm_to_canvas(usable_x_min, usable_y_min)
+        ux1, uy1 = mm_to_canvas(usable_x_max, usable_y_max)
+        canvas.create_rectangle(ux0, uy1, ux1, uy0, outline="#4488cc", width=1, dash=(4, 4))
 
         # Draw fitted contours
         if self.phase_b_result and self.phase_b_result["contours_fitted"]:
-            for cnt in self.phase_b_result["contours_fitted"]:
+            for i, cnt in enumerate(self.phase_b_result["contours_fitted"]):
                 points = []
                 for pt in cnt:
                     mx, my = float(pt[0][0]), float(pt[0][1])
                     px, py = mm_to_canvas(mx, my)
                     points.extend([px, py])
                 if len(points) >= 6:
-                    canvas.create_polygon(points, outline="#ff4444", fill="", width=1)
+                    if i == self.selected_contour_idx:
+                        canvas.create_polygon(points, outline="#00ff00", fill="",
+                                               width=3)
+                    else:
+                        canvas.create_polygon(points, outline="#ff4444", fill="",
+                                               width=2)
 
     # ------------------------------------------------------------------
     # Save SCAD
