@@ -190,7 +190,7 @@ def make_silhouette(image):
     sil[mask==255] = 255
     return sil
 
-def fit_into_IO_Shield(cnts, dim=[[8, 156], [4, 44.5]], pixels_per_mm=None,
+def fit_into_IO_Shield(cnts, dim=[[3.8, 160.2], [3.8, 44.7]], pixels_per_mm=None,
                        left_anchor_mm=8.0, bottom_anchor_mm=4.0):
     """
     Scale and position contours to fit within standard IO shield dimensions.

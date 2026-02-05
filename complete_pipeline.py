@@ -214,7 +214,7 @@ def full_pipeline(motherboard_image_path, output_scad_name=None,
         # Standard ATX IO shield dimensions in mm
         fitted_contours = fit_into_IO_Shield(
             straightened,
-            dim=[[8, 156], [4, 44.5]],  # [[x_min, x_max], [y_min, y_max]]
+            dim=[[3.8, 160.2], [3.8, 44.7]],  # [[x_min, x_max], [y_min, y_max]]
             pixels_per_mm=pixels_per_mm,
             left_anchor_mm=6.0  # Reduced from default 8.0 to prevent right-edge clipping
         )

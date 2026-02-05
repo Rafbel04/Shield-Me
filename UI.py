@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 import threading
 import os
+import json
 
 import cv2
 import numpy as np
@@ -46,6 +47,8 @@ class ShieldMeApp:
         # Contour selection / movement
         self.selected_contour_idx = None
         self.move_step_mm = 0.25
+        self.contour_offsets = {}       # {int index: [dx_mm, dy_mm]}
+        self._pending_contour_offsets = None  # loaded from settings, applied after first regen
 
         # Preview coordinate transform (set during _update_shield_preview)
         self._preview_ox = 0
@@ -199,6 +202,10 @@ class ShieldMeApp:
         self.save_btn = tk.Button(bottom, text="Save SCAD File", command=self._save_scad)
         self.save_btn.pack(side=tk.LEFT)
 
+        self.save_settings_btn = tk.Button(bottom, text="Save Settings",
+                                            command=self._save_settings)
+        self.save_settings_btn.pack(side=tk.LEFT, padx=(5, 0))
+
         self.status_label = tk.Label(bottom, text="Ready", fg="gray", anchor="w", padx=10)
         self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -211,12 +218,14 @@ class ShieldMeApp:
         self._set_controls_state(tk.DISABLED)
         self.apply_btn.config(state=tk.DISABLED)
         self.save_btn.config(state=tk.DISABLED)
+        self.save_settings_btn.config(state=tk.DISABLED)
 
     def _set_state_image_loaded(self):
         self.detect_btn.config(state=tk.NORMAL)
         self._set_controls_state(tk.DISABLED)
         self.apply_btn.config(state=tk.DISABLED)
         self.save_btn.config(state=tk.DISABLED)
+        self.save_settings_btn.config(state=tk.NORMAL)  # can save globals even before detection
         self.phase_a_result = None
         self.phase_b_result = None
         self.cutout_scales.clear()
@@ -259,6 +268,7 @@ class ShieldMeApp:
         self.image_path = path
         self.file_label.config(text=os.path.basename(path), fg="black")
         self._set_state_image_loaded()
+        self._load_settings()
         self._set_status(f"Image selected: {os.path.basename(path)}")
 
     def _select_official_shield(self):
@@ -282,6 +292,77 @@ class ShieldMeApp:
         self.official_shield_image = img
         self._update_shield_preview()
         self._set_status(f"Official shield loaded: {os.path.basename(path)}")
+
+    # ------------------------------------------------------------------
+    # Settings persistence
+    # ------------------------------------------------------------------
+
+    def _settings_path(self):
+        """Return the path to the settings JSON for the current image."""
+        if not self.image_path:
+            return None
+        stem = Path(self.image_path).stem
+        return Path(__file__).parent / "saved_configs" / f"{stem}.settings.json"
+
+    def _save_settings(self):
+        """Save UI parameters and contour offsets to disk."""
+        path = self._settings_path()
+        if path is None:
+            return
+
+        data = {
+            "ppm_multiplier": self.ppm_multiplier.get(),
+            "left_anchor_mm": self.left_anchor_mm.get(),
+            "bottom_anchor_mm": self.bottom_anchor_mm.get(),
+            "cutout_scales": dict(self.cutout_scales),
+            "official_shield_path": self.official_shield_path or "",
+            "contour_offsets": {str(k): v for k, v in self.contour_offsets.items()},
+        }
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        self._set_status(f"Settings saved: {path.name}")
+
+    def _load_settings(self):
+        """Load saved settings for the current image, if they exist."""
+        path = self._settings_path()
+        if path is None or not path.exists():
+            return
+
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+
+        # Restore slider values
+        if "ppm_multiplier" in data:
+            self.ppm_multiplier.set(data["ppm_multiplier"])
+        if "left_anchor_mm" in data:
+            self.left_anchor_mm.set(data["left_anchor_mm"])
+        if "bottom_anchor_mm" in data:
+            self.bottom_anchor_mm.set(data["bottom_anchor_mm"])
+
+        # Restore cutout scales
+        if "cutout_scales" in data:
+            self.cutout_scales = {k: float(v) for k, v in data["cutout_scales"].items()}
+
+        # Restore official shield image
+        if data.get("official_shield_path") and os.path.isfile(data["official_shield_path"]):
+            img = cv2.imread(data["official_shield_path"])
+            if img is not None:
+                self.official_shield_path = data["official_shield_path"]
+                self.official_shield_image = img
+
+        # Store contour offsets for later application (after regeneration)
+        if data.get("contour_offsets"):
+            self._pending_contour_offsets = {
+                int(k): v for k, v in data["contour_offsets"].items()
+            }
+
+        self._set_status(f"Settings loaded: {path.name}")
 
     # ------------------------------------------------------------------
     # Detection (threaded)
@@ -332,6 +413,17 @@ class ShieldMeApp:
         # Auto-generate first preview
         self._regenerate()
 
+        # Re-apply saved contour offsets if we have pending ones
+        if self._pending_contour_offsets and self.phase_b_result:
+            fitted = self.phase_b_result["contours_fitted"]
+            for idx, (dx, dy) in self._pending_contour_offsets.items():
+                if 0 <= idx < len(fitted):
+                    fitted[idx][:, :, 0] += dx
+                    fitted[idx][:, :, 1] += dy
+            self.contour_offsets = dict(self._pending_contour_offsets)
+            self._pending_contour_offsets = None
+            self._update_shield_preview()
+
     def _update_summary(self):
         self.summary_text.config(state=tk.NORMAL)
         self.summary_text.delete("1.0", tk.END)
@@ -370,6 +462,7 @@ class ShieldMeApp:
             return
 
         self.selected_contour_idx = None
+        self.contour_offsets = {}
 
         self._set_status("Generating mask and fitting contours...")
         self.root.update_idletasks()
@@ -458,17 +551,26 @@ class ShieldMeApp:
         if not (self.phase_b_result and self.phase_b_result["contours_fitted"]):
             return
 
-        cnt = self.phase_b_result["contours_fitted"][self.selected_contour_idx]
+        idx = self.selected_contour_idx
+        cnt = self.phase_b_result["contours_fitted"][idx]
         step = self.move_step_mm
 
+        dx, dy = 0.0, 0.0
         if event.keysym == "Left":
-            cnt[:, :, 0] -= step
+            dx = -step
         elif event.keysym == "Right":
-            cnt[:, :, 0] += step
+            dx = step
         elif event.keysym == "Up":
-            cnt[:, :, 1] += step  # Y increases upward in SCAD coords
+            dy = step   # Y increases upward in SCAD coords
         elif event.keysym == "Down":
-            cnt[:, :, 1] -= step
+            dy = -step
+
+        cnt[:, :, 0] += dx
+        cnt[:, :, 1] += dy
+
+        # Accumulate offset for persistence
+        prev = self.contour_offsets.get(idx, [0.0, 0.0])
+        self.contour_offsets[idx] = [prev[0] + dx, prev[1] + dy]
 
         self._update_shield_preview()
 
@@ -578,6 +680,7 @@ class ShieldMeApp:
 
         ok = phase_c_save_scad(self.phase_b_result, filepath)
         if ok:
+            self._save_settings()
             self._set_status(f"Saved: {filepath}")
         else:
             self._set_status("Error saving SCAD file.")

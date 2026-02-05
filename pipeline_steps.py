@@ -134,7 +134,7 @@ def phase_b_generate(phase_a_result, cutout_scales=None,
     # Fit to IO shield dimensions
     fitted = fit_into_IO_Shield(
         straightened,
-        dim=[[8, 156], [4, 44.5]],
+        dim=[[3.8, 160.2], [3.8, 44.7]],
         pixels_per_mm=pixels_per_mm,
         left_anchor_mm=left_anchor_mm,
         bottom_anchor_mm=bottom_anchor_mm,
