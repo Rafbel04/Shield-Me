@@ -181,7 +181,7 @@ class ShieldMeApp:
         ppm_row = tk.Frame(controls)
         ppm_row.pack(fill=tk.X, pady=(2, 0))
 
-        self.ppm_slider = tk.Scale(ppm_row, from_=0.50, to=2.00, resolution=0.01,
+        self.ppm_slider = tk.Scale(ppm_row, from_=0.50, to=2.00, resolution=0.001,
                                     orient=tk.HORIZONTAL, variable=self.ppm_multiplier,
                                     showvalue=False)
         self.ppm_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))

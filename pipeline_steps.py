@@ -96,7 +96,8 @@ def phase_b_generate(phase_a_result, cutout_scales=None,
     Args:
         phase_a_result: dict returned by phase_a_detect().
         cutout_scales: {port_type: float} per-type cutout scale (default 1.0).
-        ppm_multiplier: Multiplier applied to pixels_per_mm (default 1.0).
+        ppm_multiplier: Scale adjustment factor. Values > 1.0 grow contours,
+                        < 1.0 shrink them (default 1.0).
         left_anchor_mm: Left anchor offset in mm (default 6.0).
         bottom_anchor_mm: Bottom anchor offset in mm (default 4.0).
 
@@ -110,7 +111,7 @@ def phase_b_generate(phase_a_result, cutout_scales=None,
     raw_ppm = phase_a_result["pixels_per_mm"]
 
     # Adjust pixels_per_mm
-    pixels_per_mm = raw_ppm * ppm_multiplier if raw_ppm is not None else None
+    pixels_per_mm = raw_ppm / ppm_multiplier if raw_ppm is not None else None
 
     # Create clean mask with optional per-type cutout scaling
     mask = applicator.create_clean_mask(
