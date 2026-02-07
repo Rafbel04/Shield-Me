@@ -36,6 +36,7 @@ class PortMaskApplicator:
         'optical_audio': (8.0, 8.0),  # Optical S/PDIF
         'ethernet': (15.9, 13.1),  # RJ45 jack housing
         'screw': (5.0, 5.0),      # Screw hole
+        'wifi': (10.0, 10.0),     # WiFi antenna connector
     }
 
     def __init__(self, templates_dir="templates", cutouts_dir="cutouts"):

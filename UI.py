@@ -28,6 +28,7 @@ class ShieldMeApp:
         'optical_audio': '#FF69B4',
         'ethernet':      '#FFFF00',
         'screw':         '#808000',
+        'wifi':          '#FF8000',
     }
 
     def __init__(self, root):
