@@ -39,6 +39,7 @@ class InteractivePortSelector:
         ord('o'): 'optical_audio',
         ord('e'): 'ethernet',
         ord('s'): 'screw',
+        ord('w'): 'wifi',
     }
 
     COLORS = {
@@ -53,6 +54,7 @@ class InteractivePortSelector:
         'optical_audio': (180, 105, 255),
         'ethernet':      (0, 255, 255),
         'screw':         (0, 128, 128),
+        'wifi':          (255, 128, 0),
     }
 
     def __init__(self, image, applicator, image_name=None, config_dir="saved_configs"):
@@ -353,11 +355,15 @@ class InteractivePortSelector:
 
     def _draw_help_overlay(self, frame):
         sorted_keys = sorted(self.KEY_MAP.items(), key=lambda kv: kv[1])
-        line_h = 22
-        overlay_w = 240
-        overlay_h = (len(sorted_keys) + 2) * line_h
+        line_h = 20
+        col_w = 135
+        num_cols = 2
+        items_per_col = (len(sorted_keys) + num_cols - 1) // num_cols
+
+        overlay_w = col_w * num_cols + 20
+        overlay_h = (items_per_col + 2) * line_h
         x0 = frame.shape[1] - overlay_w - 10
-        y0 = frame.shape[0] - overlay_h - 10
+        y0 = 10
 
         # Clamp to frame
         x0 = max(0, x0)
@@ -374,18 +380,23 @@ class InteractivePortSelector:
         cv2.putText(frame, "KEYBOARD SHORTCUTS", (x0 + 10, y0 + line_h),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Port type lines
+        # Port type lines in columns
         for i, (key_ord, port_type) in enumerate(sorted_keys):
-            y_text = y0 + (i + 2) * line_h
+            col = i // items_per_col
+            row = i % items_per_col
+
+            x_offset = x0 + 10 + col * col_w
+            y_text = y0 + (row + 2) * line_h
+
             color = self.COLORS.get(port_type, (255, 255, 255))
             # Color swatch
-            cv2.rectangle(frame, (x0 + 10, y_text - 10),
-                          (x0 + 22, y_text), color, -1)
+            cv2.rectangle(frame, (x_offset, y_text - 10),
+                          (x_offset + 12, y_text), color, -1)
             label = f"[{chr(key_ord)}] {port_type}"
             if port_type == self._current_port:
-                label += "  <--"
-            cv2.putText(frame, label, (x0 + 28, y_text),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                label += " <"
+            cv2.putText(frame, label, (x_offset + 16, y_text),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
 
     @staticmethod
     def _draw_dashed_rect(frame, pt1, pt2, color, dash_len=8, gap_len=5):
