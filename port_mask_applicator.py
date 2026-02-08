@@ -63,10 +63,17 @@ class PortMaskApplicator:
 
         # Port types to look for
         port_types = ['usb', 'vga', 'hdmi', 'dp', 'usb_c', 'dvi', 'ps2',
-                     'audio', 'optical_audio', 'ethernet', 'screw']
+                     'audio', 'optical_audio', 'ethernet', 'screw', 'wifi']
+
+        # Mapping from port_type to actual template directory name (case-insensitive file systems)
+        dir_name_map = {
+            'usb_c': 'usb-c',
+            'wifi': 'Wi-Fi',
+        }
 
         for port_type in port_types:
-            template_dir = os.path.join(self.templates_dir, port_type)
+            dir_name = dir_name_map.get(port_type, port_type)
+            template_dir = os.path.join(self.templates_dir, dir_name)
             cutout_path = os.path.join(self.cutouts_dir, f"{port_type}.png")
 
             if not os.path.isdir(template_dir) or not os.path.exists(cutout_path):
